@@ -139,6 +139,7 @@ var coreEndpoints = []Endpoint{
 	{"POST", "/audit/page", "Audit a single page with browser enrichment", CapNone, false},
 	{"POST", "/audit", "Run a multi-page site audit", CapNone, false},
 	{"POST", "/scrape", "Scrape a site: HTTP crawl plus browser enrichment", CapNone, false},
+	{"POST", "/keysearch", "Search a rendered page for leaked API keys", CapNone, false},
 
 	{"GET", "/network", "Network log", CapNone, true},
 	{"GET", "/network/stream", "Network SSE stream", CapNone, true},
