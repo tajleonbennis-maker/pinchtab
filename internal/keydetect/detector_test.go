@@ -53,3 +53,49 @@ func TestMask(t *testing.T) {
 		t.Fatalf("unexpected short mask %q", Mask("short"))
 	}
 }
+
+func TestEntropyAnchoredToSensitiveField(t *testing.T) {
+	// A high-entropy value behind a sensitive field name is flagged.
+	content := `{"api_key": "b4eb9b9063f24daf9e84075ec6aa5366"}`
+	findings := Detect(content)
+	for _, f := range findings {
+		if f.Kind == "entropy" {
+			return
+		}
+	}
+	t.Fatalf("expected entropy finding for api_key value, got %+v", findings)
+}
+
+func TestEntropyIgnoresNonSensitiveContext(t *testing.T) {
+	// High-entropy text that is not a sensitive assignment must not be flagged.
+	content := `normalizeCodeBlockShowLineNumbers /_next/static/chunks/145f069teoa7h.js`
+	findings := Detect(content)
+	for _, f := range findings {
+		if f.Kind == "entropy" {
+			t.Fatalf("unexpected entropy finding: %+v", f)
+		}
+	}
+}
+
+func TestPlaceholderExcluded(t *testing.T) {
+	findings := Detect(`{"api_key": "nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`)
+	for _, f := range findings {
+		if f.MaskedKey == "nva****xxxx" {
+			t.Fatalf("placeholder should be excluded, got %+v", f)
+		}
+	}
+}
+
+func TestProviderReclassified(t *testing.T) {
+	content := `"base_url":"https://api.deepseek.com","api_key":"sk-b4eb9b9063f24daf9e84075ec6aa5366"`
+	findings := Detect(content)
+	for _, f := range findings {
+		if f.Kind == "rule" {
+			if f.Provider != "DeepSeek" {
+				t.Fatalf("expected DeepSeek provider, got %q", f.Provider)
+			}
+			return
+		}
+	}
+	t.Fatal("expected rule finding")
+}
