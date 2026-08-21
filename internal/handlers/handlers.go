@@ -381,6 +381,7 @@ func (h *Handlers) bridgeBindings() []routeBinding {
 		{pattern: "POST /audit/page", root: h.HandleAuditPage},
 		{pattern: "POST /audit", root: h.HandleAudit},
 		{pattern: "POST /scrape", root: h.HandleScrape},
+		{pattern: "POST /keysearch", root: h.HandleKeySearch},
 		{pattern: "GET /network", root: h.HandleNetwork, tab: h.HandleTabNetwork},
 		{pattern: "GET /network/stream", root: h.HandleNetworkStream, tab: h.HandleTabNetworkStream},
 		{pattern: "GET /network/export", root: h.HandleNetworkExport, tab: h.HandleTabNetworkExport},
