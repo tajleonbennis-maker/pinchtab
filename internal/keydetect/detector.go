@@ -38,8 +38,17 @@ func Detect(content string) []Finding {
 				continue
 			}
 			full := content[start:end]
+			if isPlaceholder(full) {
+				continue
+			}
+			// Shape rules like sk- are shared by several providers; reclassify
+			// from surrounding context when a more specific provider is known.
+			provider := r.provider
+			if p := classify(full, content, start); p != "" {
+				provider = p
+			}
 			out = append(out, Finding{
-				Provider:    r.provider,
+				Provider:    provider,
 				Kind:        "rule",
 				MaskedKey:   Mask(full),
 				Fingerprint: Fingerprint(full),
@@ -70,6 +79,21 @@ func Mask(full string) string {
 func Fingerprint(full string) string {
 	sum := sha256.Sum256([]byte(full))
 	return hex.EncodeToString(sum[:])
+}
+
+// isPlaceholder reports whether a matched value is a redaction placeholder
+// (e.g. "nvapi-xxxx...") rather than a real secret.
+func isPlaceholder(s string) bool {
+	if len(s) < 8 {
+		return false
+	}
+	count := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == 'x' || s[i] == 'X' || s[i] == '*' {
+			count++
+		}
+	}
+	return count*5 >= len(s)*3
 }
 
 func contextAround(content string, start, end int) string {
