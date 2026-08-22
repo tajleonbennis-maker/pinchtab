@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebLens 监控巡检</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --text: #1f2329;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --brand: #185FA5;
+    --ok: #1D9E75;
+    --changed: #BA7517;
+    --error: #E24B4A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 24px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .add-bar {
+    display: flex; gap: 10px; margin: 20px 0;
+    background: var(--card); padding: 14px; border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .add-bar input[type=text] {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 14px;
+  }
+  .add-bar select {
+    padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 14px; background: #fff;
+  }
+  .add-bar button {
+    padding: 9px 20px; border: none; border-radius: 8px;
+    background: var(--brand); color: #fff; font-size: 14px; cursor: pointer;
+  }
+  .add-bar button:hover { opacity: 0.9; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; margin-bottom: 12px;
+  }
+  .card .row { display: flex; align-items: center; gap: 10px; }
+  .card .url {
+    font-weight: 500; font-size: 14px; flex: 1;
+    word-break: break-all;
+  }
+  .badge {
+    font-size: 12px; padding: 3px 10px; border-radius: 20px; white-space: nowrap;
+  }
+  .badge.ok { background: #E1F5EE; color: var(--ok); }
+  .badge.changed { background: #FAEEDA; color: var(--changed); }
+  .badge.error { background: #FCEBEB; color: var(--error); }
+  .card .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .card .actions { margin-top: 10px; display: flex; gap: 8px; }
+  .card button {
+    font-size: 12px; padding: 5px 12px; border: 1px solid var(--border);
+    background: #fff; border-radius: 6px; cursor: pointer; color: var(--text);
+  }
+  .card button.del { color: var(--error); }
+  .changes {
+    margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px;
+    display: none;
+  }
+  .changes.open { display: block; }
+  .change-item {
+    font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--border);
+  }
+  .change-item .time { color: var(--muted); font-size: 12px; }
+  .change-item .diff { margin-top: 4px; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; font-size: 14px; }
+  .err-msg { color: var(--error); font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>WebLens 监控巡检</h1>
+    <p>输入网址，设定频率，网页一有变化就告诉你</p>
+  </header>
+
+  <div class="add-bar">
+    <input type="text" id="url" placeholder="https://example.com" />
+    <select id="interval">
+      <option value="30s">每 30 秒</option>
+      <option value="1m" selected>每 1 分钟</option>
+      <option value="5m">每 5 分钟</option>
+      <option value="30m">每 30 分钟</option>
+      <option value="1h">每 1 小时</option>
+      <option value="6h">每 6 小时</option>
+      <option value="24h">每 24 小时</option>
+    </select>
+    <button onclick="addTarget()">开始监控</button>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<script>
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+async function addTarget() {
+  const url = document.getElementById('url').value.trim();
+  const interval = document.getElementById('interval').value;
+  if (!url) return alert('请输入网址');
+  const res = await api('/api/targets', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url, interval})
+  });
+  if (res.error) return alert(res.error);
+  document.getElementById('url').value = '';
+  refresh();
+}
+
+async function removeTarget(id) {
+  await api('/api/targets/' + id, {method: 'DELETE'});
+  refresh();
+}
+
+async function toggleChanges(id) {
+  const el = document.getElementById('changes-' + id);
+  if (el.classList.contains('open')) {
+    el.classList.remove('open');
+    return;
+  }
+  const evs = await api('/api/targets/' + id + '/changes');
+  el.innerHTML = evs.length === 0
+    ? '<div class="empty">暂无变化记录</div>'
+    : evs.map(e => `
+      <div class="change-item">
+        <div class="time">${new Date(e.time).toLocaleString()} · ${e.oldLen} → ${e.newLen} 字符</div>
+        <div class="diff">${escapeHtml(e.diff)}</div>
+      </div>`).join('');
+  el.classList.add('open');
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function statusBadge(s) {
+  const label = {ok:'正常', changed:'已变化', error:'出错'}[s] || s;
+  return `<span class="badge ${s}">${label}</span>`;
+}
+
+async function refresh() {
+  const list = await api('/api/targets');
+  const el = document.getElementById('list');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty">还没有监控目标，先添加一个网址吧</div>';
+    return;
+  }
+  el.innerHTML = list.map(t => `
+    <div class="card">
+      <div class="row">
+        <div class="url">${escapeHtml(t.url)}</div>
+        ${statusBadge(t.status)}
+      </div>
+      <div class="meta">
+        频率：${t.interval} · 上次检查：${t.lastCheck ? new Date(t.lastCheck).toLocaleString() : '—'} · 变化 ${t.changeCount} 次
+        ${t.lastError ? `<div class="err-msg">${escapeHtml(t.lastError)}</div>` : ''}
+      </div>
+      <div class="actions">
+        <button onclick="toggleChanges('${t.id}')">查看变化</button>
+        <button class="del" onclick="removeTarget('${t.id}')">删除</button>
+      </div>
+      <div class="changes" id="changes-${t.id}"></div>
+    </div>`).join('');
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
