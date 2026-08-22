@@ -58,6 +58,8 @@ type ChangeEvent struct {
 	OldLen   int       `json:"oldLen"`
 	NewLen   int       `json:"newLen"`
 	Diff     string    `json:"diff"`
+	OldText  string    `json:"oldText,omitempty"`
+	NewText  string    `json:"newText,omitempty"`
 }
 
 type Monitor struct {
@@ -144,9 +146,10 @@ func (m *Monitor) check(t *Target) {
 		return
 	}
 
-	hash := sha256Hex(body)
 	r := seaportal.FromHTML(string(body), t.URL)
 	content := r.Content
+	// 用正文 hash 而非原始 HTML hash，过滤掉渲染噪声（属性、注释、脚本、链接细节等）。
+	hash := sha256Hex([]byte(content))
 
 	oldHash := t.LastHash
 	oldSnap := latestSnapshot(m.history[t.ID])
@@ -162,6 +165,8 @@ func (m *Monitor) check(t *Target) {
 			OldLen:   oldSnap.Length,
 			NewLen:   len(content),
 			Diff:     diffSummary(oldSnap.Head, content),
+			OldText:  oldSnap.Head,
+			NewText:  truncate(content, 3000),
 		}
 		m.events[t.ID] = append(m.events[t.ID], ev)
 	} else {
@@ -176,7 +181,7 @@ func (m *Monitor) check(t *Target) {
 		Time:   time.Now(),
 		Hash:   hash,
 		Length: len(content),
-		Head:   truncate(content, 600),
+		Head:   truncate(content, 3000),
 	}
 	m.history[t.ID] = append(m.history[t.ID], snap)
 	if len(m.history[t.ID]) > 20 {
