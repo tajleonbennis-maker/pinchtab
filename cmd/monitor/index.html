@@ -81,6 +81,7 @@
   .diff-view .dline { background: #FCEBEB; color: #791F1F; padding: 2px 8px; border-radius: 4px; margin: 2px 0; word-break: break-all; }
   .diff-view .aline { background: #E1F5EE; color: #0F6E56; padding: 2px 8px; border-radius: 4px; margin: 2px 0; word-break: break-all; }
   .diff-view .sign { font-weight: 600; margin-right: 8px; }
+  .diff-view .ctxline { color: var(--muted); padding: 1px 8px; opacity: 0.65; word-break: break-all; }
   .empty { color: var(--muted); text-align: center; padding: 40px 0; font-size: 14px; }
   .err-msg { color: var(--error); font-size: 12px; margin-top: 4px; }
 </style>
@@ -163,9 +164,14 @@ function renderDiff(oldText, newText) {
   while (i < oldLines.length && i < newLines.length && oldLines[i] === newLines[i]) i++;
   let j1 = oldLines.length - 1, j2 = newLines.length - 1;
   while (j1 >= i && j2 >= i && oldLines[j1] === newLines[j2]) { j1--; j2--; }
+  const ctx = 2;
   const parts = [];
+  if (i > ctx) parts.push(`<div class="ctxline">… 前 ${i - ctx} 行未变 …</div>`);
+  for (let k = Math.max(0, i - ctx); k < i; k++) parts.push(`<div class="ctxline">　${escapeHtml(oldLines[k])}</div>`);
   for (let k = i; k <= j1; k++) parts.push(`<div class="dline"><span class="sign">−</span>${escapeHtml(oldLines[k]) || '&nbsp;'}</div>`);
   for (let k = i; k <= j2; k++) parts.push(`<div class="aline"><span class="sign">+</span>${escapeHtml(newLines[k]) || '&nbsp;'}</div>`);
+  for (let k = j2 + 1; k < Math.min(newLines.length, j2 + 1 + ctx); k++) parts.push(`<div class="ctxline">　${escapeHtml(newLines[k])}</div>`);
+  if (j2 + 1 + ctx < newLines.length) parts.push(`<div class="ctxline">… 后 ${newLines.length - (j2 + 1 + ctx)} 行未变 …</div>`);
   return parts.join('') || '<div class="empty">内容变化很小</div>';
 }
 
