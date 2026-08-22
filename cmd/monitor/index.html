@@ -77,6 +77,10 @@
   }
   .change-item .time { color: var(--muted); font-size: 12px; }
   .change-item .diff { margin-top: 4px; }
+  .diff-view { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; margin-top: 6px; }
+  .diff-view .dline { background: #FCEBEB; color: #791F1F; padding: 2px 8px; border-radius: 4px; margin: 2px 0; word-break: break-all; }
+  .diff-view .aline { background: #E1F5EE; color: #0F6E56; padding: 2px 8px; border-radius: 4px; margin: 2px 0; word-break: break-all; }
+  .diff-view .sign { font-weight: 600; margin-right: 8px; }
   .empty { color: var(--muted); text-align: center; padding: 40px 0; font-size: 14px; }
   .err-msg { color: var(--error); font-size: 12px; margin-top: 4px; }
 </style>
@@ -147,9 +151,22 @@ async function toggleChanges(id) {
     : evs.map(e => `
       <div class="change-item">
         <div class="time">${new Date(e.time).toLocaleString()} · ${e.oldLen} → ${e.newLen} 字符</div>
-        <div class="diff">${escapeHtml(e.diff)}</div>
+        <div class="diff-view">${renderDiff(e.oldText, e.newText)}</div>
       </div>`).join('');
   el.classList.add('open');
+}
+
+function renderDiff(oldText, newText) {
+  const oldLines = (oldText || '').split('\n');
+  const newLines = (newText || '').split('\n');
+  let i = 0;
+  while (i < oldLines.length && i < newLines.length && oldLines[i] === newLines[i]) i++;
+  let j1 = oldLines.length - 1, j2 = newLines.length - 1;
+  while (j1 >= i && j2 >= i && oldLines[j1] === newLines[j2]) { j1--; j2--; }
+  const parts = [];
+  for (let k = i; k <= j1; k++) parts.push(`<div class="dline"><span class="sign">−</span>${escapeHtml(oldLines[k]) || '&nbsp;'}</div>`);
+  for (let k = i; k <= j2; k++) parts.push(`<div class="aline"><span class="sign">+</span>${escapeHtml(newLines[k]) || '&nbsp;'}</div>`);
+  return parts.join('') || '<div class="empty">内容变化很小</div>';
 }
 
 function escapeHtml(s) {
