@@ -99,6 +99,10 @@
       <option value="6h">每 6 小时</option>
       <option value="24h">每 24 小时</option>
     </select>
+    <select id="mode">
+      <option value="static" selected>静态站</option>
+      <option value="dynamic">动态站（渲染）</option>
+    </select>
     <button onclick="addTarget()">开始监控</button>
   </div>
 
@@ -114,11 +118,12 @@ async function api(path, opts) {
 async function addTarget() {
   const url = document.getElementById('url').value.trim();
   const interval = document.getElementById('interval').value;
+  const mode = document.getElementById('mode').value;
   if (!url) return alert('请输入网址');
   const res = await api('/api/targets', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({url, interval})
+    body: JSON.stringify({url, interval, mode})
   });
   if (res.error) return alert(res.error);
   document.getElementById('url').value = '';
@@ -170,7 +175,7 @@ async function refresh() {
         ${statusBadge(t.status)}
       </div>
       <div class="meta">
-        频率：${t.interval} · 上次检查：${t.lastCheck ? new Date(t.lastCheck).toLocaleString() : '—'} · 变化 ${t.changeCount} 次
+        模式：${t.mode === 'dynamic' ? '动态站（渲染）' : '静态站'} · 频率：${t.interval} · 上次检查：${t.lastCheck ? new Date(t.lastCheck).toLocaleString() : '—'} · 变化 ${t.changeCount} 次
         ${t.lastError ? `<div class="err-msg">${escapeHtml(t.lastError)}</div>` : ''}
       </div>
       <div class="actions">
