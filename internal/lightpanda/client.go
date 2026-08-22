@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/gobwas/ws"
@@ -124,23 +125,47 @@ func (c *Client) Render(ctx context.Context, url string) (string, error) {
 		return "", err
 	}
 
-	// Let JS execute and late resources land before reading the DOM. A fixed
-	// window is crude; a network-quiet heuristic can replace it later.
-	time.Sleep(2 * time.Second)
-
-	var eval struct {
-		Result struct {
-			Value string `json:"value"`
-		} `json:"result"`
-	}
+	// 等 DOM 稳定：轮询取 outerHTML 长度，连续两次一致才认为页面加载完成。
+	// 固定等待窗口对慢站/动态站不够（会拿到半加载的页面），改成轮询直到稳定。
 	evalParams, _ := json.Marshal(map[string]any{
 		"expression":    "document.documentElement.outerHTML",
 		"returnByValue": true,
 	})
-	if err := c.call(ctx, "Runtime.evaluate", evalParams, &eval); err != nil {
-		return "", err
+	var html string
+	lastLen := -1
+	stableCount := 0
+	for i := 0; i < 15; i++ {
+		time.Sleep(1 * time.Second)
+		var eval struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		if err := c.call(ctx, "Runtime.evaluate", evalParams, &eval); err != nil {
+			return "", err
+		}
+		html = eval.Result.Value
+		l := len(html)
+		if l == lastLen && l > 0 {
+			stableCount++
+			if stableCount >= 2 {
+				break
+			}
+		} else {
+			lastLen = l
+			stableCount = 0
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 	}
-	return eval.Result.Value, nil
+
+	// 导航失败时 Lightpanda 会把错误渲染成页面内容，这里识别并报错，
+	// 避免把「Navigation failed」错误页当成正文（否则会产生空↔残留的抖动误报）。
+	if strings.Contains(html, "Navigation failed") {
+		return "", fmt.Errorf("navigation failed (page did not load)")
+	}
+	return html, nil
 }
 
 // call sends one CDP command (session-scoped once attached) and blocks for
