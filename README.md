@@ -75,12 +75,28 @@ lpfetch -lp 127.0.0.1:9222 <url> [out.md]   # 慢路径（Lightpanda 渲染）
 
 驱动 Lightpanda 的 Go 客户端在 `internal/lightpanda`（处理了 `browserContextId` 字段、sessionId 附加、默认 UA 覆盖三个 CDP 差异）。
 
+### 监控巡检（`cmd/monitor`）
+
+一个网页监控页面：输入网址 + 频率，定时抓取并检测网页变化，红绿 diff 直观展示。
+
+- **静态 / 动态双模式**：静态站走 seaportal 快路径，动态站走 Lightpanda 真实渲染（能监控 SPA、反爬站等传统云监控看不见的站点）
+- **关键词模式**：设置关键词后，只在关键词出现/消失时才算变化，适配行情站、reddit 等高频变化页面
+- **通俗摘要**：每次变化首行一句话总结（「新增 2 行、删除 1 行」「关键词「特价」出现了」）+ 红绿 diff 细节
+- 自托管，数据在自己服务器，可私有化
+
+```bash
+go build ./cmd/monitor && ./monitor    # 默认监听 8080
+# 监控内网站点加：MONITOR_ALLOW_PRIVATE=1 ./monitor
+# 动态站渲染的 Lightpanda 地址：LIGHTPANDA_ADDR=127.0.0.1:9222
+```
+
 ## 产品矩阵（同一个底座，换分析逻辑）
 
 | 方向 | 说明 | 状态 |
 |---|---|---|
 | **密钥泄露监测** | 全网测绘目标组件的 API key 泄露，负责任披露 | ✅ 已跑通（206 资产 3.6 分钟扫完，命中 15 key） |
 | **网页数据提取** | URL → 正文 / 结构化数据，Scraping as a Service | ✅ 已跑通（快慢双路径，wikipedia 507KB 实测） |
+| **监控巡检** | 网页变化监测，静态/动态双模式 + 关键词，红绿 diff | ✅ 已跑通（102 部署，reddit/binance 实测） |
 | **AI 数据采集** | 舆情 / 竞品 / 价格监测，为模型喂数据 | 📋 规划 |
 | **浏览器即服务** | 封装为通用浏览器 API 供 AI Agent 调用 | 📋 规划 |
 
@@ -116,6 +132,9 @@ go run ./cmd/fetch "https://example.com" out.md
 
 # 数据提取：慢路径（动态站，Lightpanda 渲染）
 go run ./cmd/lpfetch -lp 127.0.0.1:9222 "https://example.com" out.md
+
+# 监控巡检：网页变化监控（页面 + API，默认 8080）
+go build ./cmd/monitor && ./monitor
 ```
 
 > 提示：`/scrape` 等浏览器端点在当前 `simple` 调度策略下需要先有可用 instance；
@@ -130,4 +149,4 @@ go run ./cmd/lpfetch -lp 127.0.0.1:9222 "https://example.com" out.md
 
 ## 致谢与许可
 
-**WebLens** 基于 [pinchtab](https://github.com/pinchtab/pinchtab) 二次开发，沿用其 **Apache 2.0** 许可。浏览器控制面、多实例编排、安全边界等核心能力来自上游；keydetect 检测引擎、keysearch 端点、Lightpanda 驱动、fetch/lpfetch 数据提取均为本仓库新增。
+**WebLens** 基于 [pinchtab](https://github.com/pinchtab/pinchtab) 二次开发，沿用其 **Apache 2.0** 许可。浏览器控制面、多实例编排、安全边界等核心能力来自上游；keydetect 检测引擎、keysearch 端点、Lightpanda 驱动、fetch/lpfetch 数据提取、monitor 监控巡检均为本仓库新增。
