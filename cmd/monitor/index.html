@@ -77,6 +77,11 @@
   }
   .change-item .time { color: var(--muted); font-size: 12px; }
   .change-item .summary { font-weight: 500; margin: 4px 0; color: var(--text); }
+  .what { font-size: 13px; margin: 6px 0; line-height: 1.9; }
+  .what span { background: #E6F1FB; padding: 1px 8px; border-radius: 4px; margin-right: 6px; word-break: break-all; }
+  .what.del span { background: #FCEBEB; color: #791F1F; }
+  .diff-details { margin-top: 6px; }
+  .diff-details summary { cursor: pointer; color: var(--brand); font-size: 12px; user-select: none; }
   .change-item .diff { margin-top: 4px; }
   .diff-view { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; margin-top: 6px; }
   .diff-view .dline { background: #FCEBEB; color: #791F1F; padding: 2px 8px; border-radius: 4px; margin: 2px 0; word-break: break-all; }
@@ -144,22 +149,58 @@ async function removeTarget(id) {
   refresh();
 }
 
+const expandedCache = {};  // id -> 已渲染的变化 HTML，防止自动刷新把展开状态冲掉
+
 async function toggleChanges(id) {
   const el = document.getElementById('changes-' + id);
   if (el.classList.contains('open')) {
     el.classList.remove('open');
+    delete expandedCache[id];
+    return;
+  }
+  if (expandedCache[id]) {
+    el.innerHTML = expandedCache[id];
+    el.classList.add('open');
     return;
   }
   const evs = await api('/api/targets/' + id + '/changes');
-  el.innerHTML = evs.length === 0
+  const html = evs.length === 0
     ? '<div class="empty">暂无变化记录</div>'
-    : evs.map(e => `
+    : evs.map(e => {
+        const {adds, dels} = extractChange(e.oldText, e.newText);
+        const what = [];
+        if (adds.length) what.push(`<div class="what"><b>新增了：</b>${adds.map(s => `<span>「${escapeHtml(truncateStr(s, 60))}」</span>`).join(' ')}</div>`);
+        if (dels.length) what.push(`<div class="what del"><b>删除了：</b>${dels.map(s => `<span>「${escapeHtml(truncateStr(s, 60))}」</span>`).join(' ')}</div>`);
+        return `
       <div class="change-item">
         <div class="time">${new Date(e.time).toLocaleString()}</div>
         ${e.summary ? `<div class="summary">${escapeHtml(e.summary)}</div>` : ''}
-        <div class="diff-view">${renderDiff(e.oldText, e.newText)}</div>
-      </div>`).join('');
+        ${what.join('')}
+        <details class="diff-details"><summary>查看技术 diff</summary><div class="diff-view">${renderDiff(e.oldText, e.newText)}</div></details>
+      </div>`;
+      }).join('');
+  expandedCache[id] = html;
+  el.innerHTML = html;
   el.classList.add('open');
+}
+
+// extractChange 从前后缀 diff 中提取「新增/删除」的具体内容片段（非程序员看这个）。
+function extractChange(oldText, newText) {
+  const oldLines = (oldText || '').split('\n');
+  const newLines = (newText || '').split('\n');
+  let i = 0;
+  while (i < oldLines.length && i < newLines.length && oldLines[i] === newLines[i]) i++;
+  let j1 = oldLines.length - 1, j2 = newLines.length - 1;
+  while (j1 >= i && j2 >= i && oldLines[j1] === newLines[j2]) { j1--; j2--; }
+  const adds = [], dels = [];
+  for (let k = i; k <= j2; k++) adds.push(newLines[k]);
+  for (let k = i; k <= j1; k++) dels.push(oldLines[k]);
+  const clean = arr => arr.map(s => (s || '').trim()).filter(s => s.length > 5).slice(0, 3);
+  return { adds: clean(adds), dels: clean(dels) };
+}
+
+function truncateStr(s, n) {
+  return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
 function renderDiff(oldText, newText) {
@@ -212,6 +253,10 @@ async function refresh() {
       </div>
       <div class="changes" id="changes-${t.id}"></div>
     </div>`).join('');
+  Object.keys(expandedCache).forEach(id => {
+    const cel = document.getElementById('changes-' + id);
+    if (cel) { cel.innerHTML = expandedCache[id]; cel.classList.add('open'); }
+  });
 }
 
 refresh();
