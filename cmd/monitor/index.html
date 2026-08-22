@@ -76,6 +76,7 @@
     font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--border);
   }
   .change-item .time { color: var(--muted); font-size: 12px; }
+  .change-item .summary { font-weight: 500; margin: 4px 0; color: var(--text); }
   .change-item .diff { margin-top: 4px; }
   .diff-view { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; margin-top: 6px; }
   .diff-view .dline { background: #FCEBEB; color: #791F1F; padding: 2px 8px; border-radius: 4px; margin: 2px 0; word-break: break-all; }
@@ -108,6 +109,7 @@
       <option value="static" selected>静态站</option>
       <option value="dynamic">动态站（渲染）</option>
     </select>
+    <input type="text" id="keyword" placeholder="关键词（可选）" />
     <button onclick="addTarget()">开始监控</button>
   </div>
 
@@ -124,14 +126,16 @@ async function addTarget() {
   const url = document.getElementById('url').value.trim();
   const interval = document.getElementById('interval').value;
   const mode = document.getElementById('mode').value;
+  const keyword = document.getElementById('keyword').value.trim();
   if (!url) return alert('请输入网址');
   const res = await api('/api/targets', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({url, interval, mode})
+    body: JSON.stringify({url, interval, mode, keyword})
   });
   if (res.error) return alert(res.error);
   document.getElementById('url').value = '';
+  document.getElementById('keyword').value = '';
   refresh();
 }
 
@@ -151,7 +155,8 @@ async function toggleChanges(id) {
     ? '<div class="empty">暂无变化记录</div>'
     : evs.map(e => `
       <div class="change-item">
-        <div class="time">${new Date(e.time).toLocaleString()} · ${e.oldLen} → ${e.newLen} 字符</div>
+        <div class="time">${new Date(e.time).toLocaleString()}</div>
+        ${e.summary ? `<div class="summary">${escapeHtml(e.summary)}</div>` : ''}
         <div class="diff-view">${renderDiff(e.oldText, e.newText)}</div>
       </div>`).join('');
   el.classList.add('open');
@@ -198,7 +203,7 @@ async function refresh() {
         ${statusBadge(t.status)}
       </div>
       <div class="meta">
-        模式：${t.mode === 'dynamic' ? '动态站（渲染）' : '静态站'} · 频率：${t.interval} · 上次检查：${t.lastCheck ? new Date(t.lastCheck).toLocaleString() : '—'} · 变化 ${t.changeCount} 次
+        模式：${t.mode === 'dynamic' ? '动态站（渲染）' : '静态站'} · 频率：${t.interval}${t.keyword ? ` · 关键词「${escapeHtml(t.keyword)}」` : ''} · 上次检查：${t.lastCheck ? new Date(t.lastCheck).toLocaleString() : '—'} · 变化 ${t.changeCount} 次
         ${t.lastError ? `<div class="err-msg">${escapeHtml(t.lastError)}</div>` : ''}
       </div>
       <div class="actions">
