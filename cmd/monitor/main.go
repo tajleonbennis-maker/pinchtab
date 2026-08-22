@@ -15,11 +15,16 @@ import (
 	"time"
 
 	seaportal "github.com/pinchtab/seaportal"
+
+	"github.com/pinchtab/pinchtab/internal/lightpanda"
 )
 
 // allowPrivate 打开后允许监控内网/私网地址（如 127.0.0.1、192.168.x.x）。
 // 默认关闭以保留 SSRF 防护；监控企业内网站点时可设 MONITOR_ALLOW_PRIVATE=1。
 var allowPrivate = os.Getenv("MONITOR_ALLOW_PRIVATE") == "1"
+
+// lpAddr 是动态站渲染所用的 Lightpanda CDP 地址，默认 127.0.0.1:9222。
+var lpAddr = os.Getenv("LIGHTPANDA_ADDR")
 
 //go:embed index.html
 var indexHTML string
@@ -29,6 +34,7 @@ type Target struct {
 	ID          string    `json:"id"`
 	URL         string    `json:"url"`
 	Interval    string    `json:"interval"`
+	Mode        string    `json:"mode"` // static / dynamic
 	LastHash    string    `json:"lastHash,omitempty"`
 	LastCheck   time.Time `json:"lastCheck,omitempty"`
 	Status      string    `json:"status"` // ok / changed / error
@@ -73,13 +79,16 @@ func NewMonitor() *Monitor {
 }
 
 // add 注册一个监控目标并启动后台抓取循环。
-func (m *Monitor) add(url, interval string) (*Target, error) {
+func (m *Monitor) add(url, interval, mode string) (*Target, error) {
 	d, err := time.ParseDuration(interval)
 	if err != nil {
 		return nil, fmt.Errorf("invalid interval: %w", err)
 	}
 	if d < 10*time.Second {
 		return nil, fmt.Errorf("interval too short (min 10s)")
+	}
+	if mode == "" {
+		mode = "static"
 	}
 
 	m.mu.Lock()
@@ -88,6 +97,7 @@ func (m *Monitor) add(url, interval string) (*Target, error) {
 		ID:       fmt.Sprintf("t%03d", m.seq),
 		URL:      url,
 		Interval: interval,
+		Mode:     mode,
 		Status:   "ok",
 	}
 	m.targets[t.ID] = t
@@ -116,17 +126,13 @@ func (m *Monitor) loop(t *Target, d time.Duration, stop chan struct{}) {
 
 // check 抓取一次并做 hash 对比。
 func (m *Monitor) check(t *Target) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	policy := seaportal.DefaultSecurityPolicy()
-	if allowPrivate {
-		policy.BlockPrivateIPs = false
+	var body []byte
+	var err error
+	if t.Mode == "dynamic" {
+		body, err = m.fetchDynamic(t.URL)
+	} else {
+		body, _, _, err = m.fetchStatic(t.URL)
 	}
-	body, _, _, err := seaportal.FetchBytes(ctx, t.URL, seaportal.FetchBytesOptions{
-		Security: policy,
-		Timeout:  30 * time.Second,
-	})
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -192,6 +198,40 @@ func (m *Monitor) remove(id string) bool {
 	delete(m.events, id)
 	delete(m.stops, id)
 	return true
+}
+
+// fetchStatic 用 seaportal 做纯 HTTP 抓取（快路径，静态站）。
+func (m *Monitor) fetchStatic(url string) ([]byte, http.Header, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	policy := seaportal.DefaultSecurityPolicy()
+	if allowPrivate {
+		policy.BlockPrivateIPs = false
+	}
+	return seaportal.FetchBytes(ctx, url, seaportal.FetchBytesOptions{
+		Security: policy,
+		Timeout:  30 * time.Second,
+	})
+}
+
+// fetchDynamic 用 Lightpanda 真实渲染后取渲染 HTML（慢路径，动态站）。
+func (m *Monitor) fetchDynamic(url string) ([]byte, error) {
+	addr := lpAddr
+	if addr == "" {
+		addr = "127.0.0.1:9222"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	client, err := lightpanda.Connect(ctx, addr)
+	if err != nil {
+		return nil, fmt.Errorf("lightpanda connect: %w", err)
+	}
+	defer client.Close()
+	html, err := client.Render(ctx, url)
+	if err != nil {
+		return nil, fmt.Errorf("lightpanda render: %w", err)
+	}
+	return []byte(html), nil
 }
 
 // ---- helpers ----
@@ -263,6 +303,7 @@ func (m *Monitor) handleAdd(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL      string `json:"url"`
 		Interval string `json:"interval"`
+		Mode     string `json:"mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "bad request"})
@@ -273,7 +314,7 @@ func (m *Monitor) handleAdd(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "url must start with http/https"})
 		return
 	}
-	t, err := m.add(req.URL, req.Interval)
+	t, err := m.add(req.URL, req.Interval, req.Mode)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
