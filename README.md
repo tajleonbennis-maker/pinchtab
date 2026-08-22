@@ -1,6 +1,6 @@
-# 浏览器自动化 · 数据检测底座
+# WebLens · 网页数据采集与检测底座
 
-> 基于 [pinchtab](https://github.com/pinchtab/pinchtab)（Apache 2.0）二次开发。
+> **WebLens（网页透镜）** —— 基于 [pinchtab](https://github.com/pinchtab/pinchtab)（Apache 2.0）二次开发。
 > 在其浏览器控制面之上，扩展为「Web 数据采集 + 泄露检测」的通用底座。
 
 ---
@@ -61,12 +61,26 @@
 go run ./cmd/keydemo ./api_bodies.txt
 ```
 
+### 数据提取 —— 快慢双路径（`cmd/fetch` / `cmd/lpfetch`）
+
+输入 URL，输出结构化正文 Markdown：
+
+- **快路径 `cmd/fetch`**：静态站走 seaportal HTTP 提取，毫秒级、零浏览器
+- **慢路径 `cmd/lpfetch`**：动态站走 Lightpanda 真实渲染再提取，秒级
+
+```bash
+fetch <url> [outfile.md]                    # 快路径
+lpfetch -lp 127.0.0.1:9222 <url> [out.md]   # 慢路径（Lightpanda 渲染）
+```
+
+驱动 Lightpanda 的 Go 客户端在 `internal/lightpanda`（处理了 `browserContextId` 字段、sessionId 附加、默认 UA 覆盖三个 CDP 差异）。
+
 ## 产品矩阵（同一个底座，换分析逻辑）
 
 | 方向 | 说明 | 状态 |
 |---|---|---|
 | **密钥泄露监测** | 全网测绘目标组件的 API key 泄露，负责任披露 | ✅ 已跑通（206 资产 3.6 分钟扫完，命中 15 key） |
-| **网页数据提取** | URL → 正文 / 结构化数据，Scraping as a Service | 🚧 雏形 |
+| **网页数据提取** | URL → 正文 / 结构化数据，Scraping as a Service | ✅ 已跑通（快慢双路径，wikipedia 507KB 实测） |
 | **AI 数据采集** | 舆情 / 竞品 / 价格监测，为模型喂数据 | 📋 规划 |
 | **浏览器即服务** | 封装为通用浏览器 API 供 AI Agent 调用 | 📋 规划 |
 
@@ -96,6 +110,12 @@ curl -X POST http://127.0.0.1:9867/keysearch \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com"}'
+
+# 数据提取：快路径（静态站）
+go run ./cmd/fetch "https://example.com" out.md
+
+# 数据提取：慢路径（动态站，Lightpanda 渲染）
+go run ./cmd/lpfetch -lp 127.0.0.1:9222 "https://example.com" out.md
 ```
 
 > 提示：`/scrape` 等浏览器端点在当前 `simple` 调度策略下需要先有可用 instance；
@@ -110,4 +130,4 @@ curl -X POST http://127.0.0.1:9867/keysearch \
 
 ## 致谢与许可
 
-基于 [pinchtab](https://github.com/pinchtab/pinchtab) 二次开发，沿用其 **Apache 2.0** 许可。浏览器控制面、多实例编排、安全边界等核心能力来自上游，keydetect、keysearch、Lightpanda 混合架构为本仓库新增。
+**WebLens** 基于 [pinchtab](https://github.com/pinchtab/pinchtab) 二次开发，沿用其 **Apache 2.0** 许可。浏览器控制面、多实例编排、安全边界等核心能力来自上游；keydetect 检测引擎、keysearch 端点、Lightpanda 驱动、fetch/lpfetch 数据提取均为本仓库新增。
