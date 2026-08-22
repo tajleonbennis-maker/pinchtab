@@ -35,11 +35,15 @@ type Target struct {
 	URL         string    `json:"url"`
 	Interval    string    `json:"interval"`
 	Mode        string    `json:"mode"` // static / dynamic
+	Keyword     string    `json:"keyword,omitempty"`
 	LastHash    string    `json:"lastHash,omitempty"`
 	LastCheck   time.Time `json:"lastCheck,omitempty"`
 	Status      string    `json:"status"` // ok / changed / error
 	LastError   string    `json:"lastError,omitempty"`
 	ChangeCount int       `json:"changeCount"`
+
+	// keywordPresent 记录关键词上次是否出现（nil = 尚未初始化）。
+	keywordPresent *bool
 }
 
 // Snapshot 是一次抓取的内容快照（正文截断存储）。
@@ -53,6 +57,7 @@ type Snapshot struct {
 // ChangeEvent 记录一次内容变化。
 type ChangeEvent struct {
 	Time     time.Time `json:"time"`
+	Summary  string    `json:"summary"`
 	FromHash string    `json:"fromHash"`
 	ToHash   string    `json:"toHash"`
 	OldLen   int       `json:"oldLen"`
@@ -81,7 +86,7 @@ func NewMonitor() *Monitor {
 }
 
 // add 注册一个监控目标并启动后台抓取循环。
-func (m *Monitor) add(url, interval, mode string) (*Target, error) {
+func (m *Monitor) add(url, interval, mode, keyword string) (*Target, error) {
 	d, err := time.ParseDuration(interval)
 	if err != nil {
 		return nil, fmt.Errorf("invalid interval: %w", err)
@@ -100,6 +105,7 @@ func (m *Monitor) add(url, interval, mode string) (*Target, error) {
 		URL:      url,
 		Interval: interval,
 		Mode:     mode,
+		Keyword:  keyword,
 		Status:   "ok",
 	}
 	m.targets[t.ID] = t
@@ -126,7 +132,7 @@ func (m *Monitor) loop(t *Target, d time.Duration, stop chan struct{}) {
 	}
 }
 
-// check 抓取一次并做 hash 对比。
+// check 抓取一次并做对比（关键词模式或 hash 模式）。
 func (m *Monitor) check(t *Target) {
 	var body []byte
 	var err error
@@ -148,18 +154,53 @@ func (m *Monitor) check(t *Target) {
 
 	r := seaportal.FromHTML(string(body), t.URL)
 	content := r.Content
+
+	if t.Keyword != "" {
+		m.checkKeyword(t, content)
+		return
+	}
+	m.checkHash(t, content)
+}
+
+// checkKeyword 关键词模式：只在关键词出现/消失时才算变化，适合 reddit/行情站等高频变化页面。
+func (m *Monitor) checkKeyword(t *Target, content string) {
+	present := strings.Contains(content, t.Keyword)
+	if t.keywordPresent != nil && *t.keywordPresent != present {
+		t.Status = "changed"
+		t.ChangeCount++
+		action := "出现"
+		if !present {
+			action = "消失"
+		}
+		ev := ChangeEvent{
+			Time:    time.Now(),
+			Summary: fmt.Sprintf("关键词「%s」%s了", t.Keyword, action),
+			NewLen:  len(content),
+			NewText: truncate(content, 3000),
+		}
+		m.events[t.ID] = append(m.events[t.ID], ev)
+	} else {
+		t.Status = "ok"
+		t.LastError = ""
+	}
+	t.keywordPresent = &present
+	t.LastCheck = time.Now()
+}
+
+// checkHash hash 模式：正文 hash 变化才算变化。
+func (m *Monitor) checkHash(t *Target, content string) {
 	// 用正文 hash 而非原始 HTML hash，过滤掉渲染噪声（属性、注释、脚本、链接细节等）。
 	hash := sha256Hex([]byte(content))
-
 	oldHash := t.LastHash
 	oldSnap := latestSnapshot(m.history[t.ID])
 
 	if oldHash != "" && oldHash != hash {
-		// 内容变了
 		t.Status = "changed"
 		t.ChangeCount++
+		adds, dels := countDiffLines(oldSnap.Head, content)
 		ev := ChangeEvent{
 			Time:     time.Now(),
+			Summary:  fmt.Sprintf("内容更新：新增 %d 行、删除 %d 行（%d → %d 字符）", adds, dels, oldSnap.Length, len(content)),
 			FromHash: oldHash,
 			ToHash:   hash,
 			OldLen:   oldSnap.Length,
@@ -187,6 +228,23 @@ func (m *Monitor) check(t *Target) {
 	if len(m.history[t.ID]) > 20 {
 		m.history[t.ID] = m.history[t.ID][len(m.history[t.ID])-20:]
 	}
+}
+
+// countDiffLines 用前后缀 diff 统计新增/删除的行数。
+func countDiffLines(old, new string) (adds, dels int) {
+	oldLines := strings.Split(old, "\n")
+	newLines := strings.Split(new, "\n")
+	i := 0
+	for i < len(oldLines) && i < len(newLines) && oldLines[i] == newLines[i] {
+		i++
+	}
+	j1 := len(oldLines) - 1
+	j2 := len(newLines) - 1
+	for j1 >= i && j2 >= i && oldLines[j1] == newLines[j2] {
+		j1--
+		j2--
+	}
+	return j2 - i + 1, j1 - i + 1
 }
 
 func (m *Monitor) remove(id string) bool {
@@ -309,6 +367,7 @@ func (m *Monitor) handleAdd(w http.ResponseWriter, r *http.Request) {
 		URL      string `json:"url"`
 		Interval string `json:"interval"`
 		Mode     string `json:"mode"`
+		Keyword  string `json:"keyword"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "bad request"})
@@ -319,7 +378,7 @@ func (m *Monitor) handleAdd(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "url must start with http/https"})
 		return
 	}
-	t, err := m.add(req.URL, req.Interval, req.Mode)
+	t, err := m.add(req.URL, req.Interval, req.Mode, strings.TrimSpace(req.Keyword))
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
